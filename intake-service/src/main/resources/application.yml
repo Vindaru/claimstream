@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: intake-service
+  threads:
+    virtual:
+      # Each HTTP request runs on a cheap virtual thread instead of a pooled OS thread (Java 21).
+      enabled: true
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/claimstream}
+    username: ${DB_USER:claimstream}
+    password: ${DB_PASSWORD:claimstream}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
