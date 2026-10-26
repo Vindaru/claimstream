@@ -6,6 +6,7 @@ COPY mvnw pom.xml ./
 COPY config config
 # Every module POM must be present: Maven reads the whole reactor even when building one module.
 COPY claims-domain/pom.xml claims-domain/pom.xml
+COPY adjudication-engine/pom.xml adjudication-engine/pom.xml
 COPY intake-service/pom.xml intake-service/pom.xml
 # Download dependencies in their own layer so code-only changes rebuild fast.
 RUN ./mvnw -q -B -pl intake-service -am dependency:go-offline
