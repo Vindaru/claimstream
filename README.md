@@ -31,6 +31,7 @@ docker compose down
 ```
 claimstream/
 ├── pom.xml                  # parent POM: Java 21, Spring Boot 3.5, Checkstyle
+├── claims-domain/           # plain-Java domain model: Money, Member, Claim...
 ├── intake-service/          # front door for claims (more services from M5)
 ├── config/checkstyle/       # code style rules
 ├── docker-compose.yml       # local stack
@@ -46,7 +47,7 @@ claimstream/
 | # | Topic | Status |
 |---|---|---|
 | M0 | Big picture & setup | ✅ |
-| M1 | Domain model (OOD) | |
+| M1 | Domain model (OOD) | ✅ |
 | M2 | Adjudication rules engine (design patterns) | |
 | M3 | Batch intake (multi-threading) | |
 | M4 | Idempotency & concurrency correctness | |
