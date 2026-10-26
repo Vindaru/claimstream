@@ -11,6 +11,7 @@ questions, quizzes) live in [`docs/lessons/`](lessons/). Design decisions live i
 | M0 | Big picture, multi-tier architecture, repo setup | [M0-big-picture.md](lessons/M0-big-picture.md) |
 | M1 | Domain model, entities vs value objects, immutability, SOLID | [M1-domain-model.md](lessons/M1-domain-model.md) |
 | M2 | Rules engine: Chain of Responsibility, Strategy, Factory, State | [M2-rules-engine.md](lessons/M2-rules-engine.md) |
+| M3 | Batch intake: thread pools, backpressure, virtual threads, race conditions | [M3-batch-intake.md](lessons/M3-batch-intake.md) |
 
 ---
 
@@ -155,3 +156,43 @@ Maria's next $150 visit: $40 finishes her deductible, plan pays 80% × $110 = $8
 - **Rule order** = cheapest, most decisive rules first.
 
 ADR: [0003-rules-engine-patterns.md](adr/0003-rules-engine-patterns.md)
+
+## M3 – Batch Intake (Multi-threading)
+
+**Summary.** A new `batch-intake` module reads a 100,000-line 837-style batch file. Each line goes through one
+stateless unit of work (`ClaimIntake`: parse → M2's `EligibilityRule` → tally). Three pipelines run that same work:
+single-threaded, a **thread pool** fed by a **bounded `ArrayBlockingQueue`** (backpressure, poison pills), and
+**virtual threads** capped by a `Semaphore`. The shared tally uses `ConcurrentHashMap` + `LongAdder`, and every
+pipeline produces exactly the same counts.
+
+**Pipeline**
+
+```mermaid
+flowchart LR
+    FILE[/batch file/] --> P[Producer] -- "put() blocks when full" --> Q[[bounded queue]]
+    Q --> W1[Worker] & W2[Worker] & WN[Worker] --> R[(BatchReport<br/>LongAdder)]
+```
+
+**Results (100,000 claims, 4 cores)**
+
+| Pipeline | I/O-bound (100 µs lookup) | CPU-bound (instant lookup) |
+|---|---|---|
+| Single thread | 18.87 s (1.0x) | 0.19 s (1.0x) |
+| Thread pool, 4 threads | 5.08 s (3.7x) | 0.19 s (1.0x) |
+| Thread pool, 64 threads | 0.50 s (37.5x) | 1.50 s (0.1x) |
+| Virtual threads, 1,000 in flight | 0.50 s (37.9x) | 0.16 s (1.2x) |
+
+Outcomes, identical every run: ACCEPTED 98,700 · DENIED:COVERAGE_TERMINATED 1,000 · DENIED:MEMBER_NOT_FOUND 200 ·
+MALFORMED 100. Race demo: 4 threads × 1M `count++` lost 1.28M updates; `LongAdder` lost none.
+
+**Remember cards**
+- **Measure first**: single-threaded baseline, then change one thing at a time.
+- **I/O-bound → more threads help; CPU-bound → about one per core.**
+- **Pool size ≈ cores × (1 + wait/compute)**, then measure.
+- **Bounded queue = backpressure**: `put()` blocks when full, so memory stays flat.
+- **Virtual threads** = cheap, one per task, great for blocking I/O; still cap them.
+- **`count++` is not atomic**: use `AtomicLong` / `LongAdder`.
+- **Thread-safe collections**: `ConcurrentHashMap`, `BlockingQueue`; never plain `HashMap` across threads.
+- **Same input → same counts**, whatever the threading. Test that.
+
+ADR: [0005-batch-intake-concurrency.md](adr/0005-batch-intake-concurrency.md)
