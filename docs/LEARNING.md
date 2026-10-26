@@ -10,6 +10,7 @@ questions, quizzes) live in [`docs/lessons/`](lessons/). Design decisions live i
 |---|---|---|
 | M0 | Big picture, multi-tier architecture, repo setup | [M0-big-picture.md](lessons/M0-big-picture.md) |
 | M1 | Domain model, entities vs value objects, immutability, SOLID | [M1-domain-model.md](lessons/M1-domain-model.md) |
+| M2 | Rules engine: Chain of Responsibility, Strategy, Factory, State | [M2-rules-engine.md](lessons/M2-rules-engine.md) |
 
 ---
 
@@ -107,3 +108,50 @@ plan pays 80% × $0 = $0 · Maria pays $110 · her deductible met becomes $460 (
 - **Immutable = thread-safe by construction**; change by returning a new object.
 - **Typed ids beat Strings**: `MemberId` and `Npi` can't be swapped by accident.
 - **Refer across aggregates by id**, not by embedding objects: smaller messages, no stale copies.
+
+## M2 – Adjudication Rules Engine (Design Patterns)
+
+**Summary.** A new `adjudication-engine` module decides PAID, DENIED or PENDED. Edits are a **Chain of Responsibility**
+(`EligibilityRule` → `DuplicateClaimRule` → `MedicalNecessityRule` → `ProviderVisitLimitRule`), each returning CONTINUE, DENY
+or PEND with a reason code. Pricing is a **Strategy** (contracted fee schedule in-network, 60% of billed out-of-network) picked by
+a **Factory**. The claim lifecycle is a **State** machine (`ClaimStatus`) that refuses illegal moves. All outside data sits behind
+**ports** (interfaces), so the whole engine runs in memory in tests. A system outage pends a claim; it never denies it.
+
+**Lifecycle**
+
+```mermaid
+stateDiagram-v2
+    [*] --> RECEIVED
+    RECEIVED --> VALIDATED : rules pass
+    RECEIVED --> DENIED : rule denies
+    RECEIVED --> PENDED : rule pends
+    VALIDATED --> PRICED
+    VALIDATED --> PENDED : no provider / rate
+    PRICED --> ADJUDICATED
+    ADJUDICATED --> PAID
+    PENDED --> RECEIVED : retry
+```
+
+**Results**
+
+| Claim | Status | Reason |
+|---|---|---|
+| CLM-5001 | PAID: allowed $110, plan $0, Maria $110 (deductible now $460) | |
+| CLM-5002 | DENIED | DUPLICATE_CLAIM |
+| CLM-5003 | DENIED | COVERAGE_TERMINATED |
+| CLM-5004 | PENDED | PROVIDER_VISIT_LIMIT (40th claim, limit 25) |
+| CLM-5005 | PENDED, then PAID on retry | ELIGIBILITY_UNAVAILABLE |
+
+Maria's next $150 visit: $40 finishes her deductible, plan pays 80% × $110 = $88, Maria pays $62.
+
+**Remember cards**
+- **Chain of Responsibility** = a line of handlers; each passes or stops the request.
+- **Strategy** = same question, swappable algorithm, chosen by the caller.
+- **Factory** = hand me the right object; callers don't know concrete classes.
+- **State** = status decides what may come next; illegal transitions are refused.
+- **Strategy vs State**: who chooses it, and does it change over the object's life?
+- **Deny vs pend**: deny is a business "no"; pend is "can't decide now". Never deny because a service is down.
+- **Ports** = interfaces to the outside world; tests use in-memory fakes.
+- **Rule order** = cheapest, most decisive rules first.
+
+ADR: [0003-rules-engine-patterns.md](adr/0003-rules-engine-patterns.md)

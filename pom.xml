@@ -22,6 +22,7 @@
     <!-- One entry per deployable or library. New services are added here milestone by milestone. -->
     <modules>
         <module>claims-domain</module>
+        <module>adjudication-engine</module>
         <module>intake-service</module>
     </modules>
 
