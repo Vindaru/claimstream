@@ -11,6 +11,7 @@ questions, quizzes) live in [`docs/lessons/`](lessons/). Design decisions live i
 | M0 | Big picture, multi-tier architecture, repo setup | [M0-big-picture.md](lessons/M0-big-picture.md) |
 | M1 | Domain model, entities vs value objects, immutability, SOLID | [M1-domain-model.md](lessons/M1-domain-model.md) |
 | M2 | Rules engine: Chain of Responsibility, Strategy, Factory, State | [M2-rules-engine.md](lessons/M2-rules-engine.md) |
+| M8.5 | Claims Copilot: LangChain / LangGraph AI agent (planned) | ADR: [0004-claims-copilot-ai-layer.md](adr/0004-claims-copilot-ai-layer.md) |
 
 ---
 
