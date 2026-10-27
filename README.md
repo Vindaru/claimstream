@@ -7,6 +7,30 @@ A claim flows through **submission → eligibility → pricing → adjudication 
 By the end, ClaimStream does that across independent services over Kafka and gRPC, with idempotency,
 sagas, circuit breakers, fraud scoring, caching and full observability.
 
+On top of that sits an **AI layer, the Claims Copilot**: a LangChain / LangGraph agent that explains, triages and
+answers questions about claims, while the deterministic engine stays the only thing that decides payment.
+
+## 🤖 Claims Copilot (AI layer, planned for M8.5)
+
+| Feature | What it does | AI technique |
+|---|---|---|
+| Fraud explainer | Turns a pended claim's signals (CLM-5004: 40 visits in a day) into a plain-English note for the reviewer | Prompting, structured output |
+| Pend-queue triage agent | Looks at each pended claim, calls ClaimStream APIs as tools, suggests *retry*, *needs review* or *likely deny* | LangGraph agent, tool calling, human-in-the-loop |
+| Member Q&A | Answers "Why did I pay $110?" from Maria's EOB and plan document | RAG on pgvector |
+| Appeal drafter | Drafts an appeal or explanation letter for a denied claim (CLM-5003) | Prompt templates, guardrails |
+
+```mermaid
+flowchart LR
+    K[[Kafka: claim events]] --> C[claims-copilot<br/>Python · LangGraph]
+    C -- tools --> API[ClaimStream APIs<br/>eligibility · history · claims]
+    C -- retrieve --> V[(pgvector<br/>plan docs, EOBs)]
+    C --> H[Human reviewer<br/>approves or rejects]
+    H --> API
+```
+
+**The rule:** the Copilot *advises*, a person *decides*. It never changes a payment, and PHI is masked before any
+prompt leaves the service. See [ADR-0004](docs/adr/0004-claims-copilot-ai-layer.md).
+
 ## Quick start
 
 Prerequisites: JDK 21, Docker Desktop running.
@@ -42,6 +66,7 @@ claimstream/
 ├── adjudication-engine/     # rules chain, pricing, benefits, claim lifecycle
 ├── batch-intake/            # 100k-claim batch file: single thread vs thread pool vs virtual threads
 ├── intake-service/          # REST intake with idempotency keys (Postgres + Redis)
+├── claims-copilot/          # (M8.5) Python LangChain / LangGraph AI agent
 ├── config/checkstyle/       # code style rules
 ├── docker-compose.yml       # local stack
 ├── .github/workflows/ci.yml # CI: style → compile → tests → image
@@ -64,6 +89,7 @@ claimstream/
 | M6 | Reliability (timeouts, retries, circuit breaker, gRPC) | |
 | M7 | Distributed transactions (saga) | |
 | M8 | Fraud detection | |
+| **M8.5** | **🤖 Claims Copilot: LangChain / LangGraph agent, tools, RAG on pgvector** | planned |
 | M9 | Scaling & performance | |
 | M10 | Observability & operations | |
 | M11 | SDLC wrap-up | |

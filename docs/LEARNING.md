@@ -13,6 +13,7 @@ questions, quizzes) live in [`docs/lessons/`](lessons/). Design decisions live i
 | M2 | Rules engine: Chain of Responsibility, Strategy, Factory, State | [M2-rules-engine.md](lessons/M2-rules-engine.md) |
 | M3 | Batch intake: thread pools, backpressure, virtual threads, race conditions | [M3-batch-intake.md](lessons/M3-batch-intake.md) |
 | M4 | Idempotency keys, race conditions, Redis SETNX, unique constraints, locking | [M4-idempotency.md](lessons/M4-idempotency.md) |
+| M8.5 | Claims Copilot: LangChain / LangGraph AI agent (planned) | ADR: [0004-claims-copilot-ai-layer.md](adr/0004-claims-copilot-ai-layer.md) |
 
 ---
 
