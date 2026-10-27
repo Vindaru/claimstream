@@ -12,9 +12,16 @@
 
     <artifactId>intake-service</artifactId>
     <name>ClaimStream :: Intake Service</name>
-    <description>Front door for claims. In M0 it only proves the stack is wired.</description>
+    <description>Front door for claims: REST intake with idempotency keys (M4).</description>
 
     <dependencies>
+        <!-- Claim, Money, MemberId...: incoming JSON is validated by building the domain model -->
+        <dependency>
+            <groupId>com.claimstream</groupId>
+            <artifactId>claims-domain</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- Presentation tier: HTTP + JSON -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -38,6 +45,15 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <!-- Versioned schema migrations, run at startup: src/main/resources/db/migration -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
 
         <!-- Tests: real Postgres + Redis in throwaway Docker containers -->
