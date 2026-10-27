@@ -10,6 +10,7 @@ COPY adjudication-engine/pom.xml adjudication-engine/pom.xml
 COPY intake-service/pom.xml intake-service/pom.xml
 # Download dependencies in their own layer so code-only changes rebuild fast.
 RUN ./mvnw -q -B -pl intake-service -am dependency:go-offline
+COPY claims-domain/src claims-domain/src
 COPY intake-service/src intake-service/src
 RUN ./mvnw -q -B -pl intake-service -am package -DskipTests
 
