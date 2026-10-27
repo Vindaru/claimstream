@@ -21,6 +21,9 @@ curl -i -X POST localhost:8080/api/v1/claims -H 'Content-Type: application/json'
   -d '{"claimId":"CLM-5002","memberId":"M-1001","providerNpi":"1234567890","dateOfService":"2026-10-20",
        "lines":[{"lineNumber":1,"cptCode":"99213","billed":150.00}]}'
 docker compose down
+
+# M3: batch intake benchmark (100k claims through 3 threading models)
+./mvnw -q -pl batch-intake -am package -DskipTests && java -jar batch-intake/target/batch-intake.jar
 ```
 
 | Service | Port |
@@ -37,6 +40,7 @@ claimstream/
 ├── pom.xml                  # parent POM: Java 21, Spring Boot 3.5, Checkstyle
 ├── claims-domain/           # plain-Java domain model: Money, Member, Claim...
 ├── adjudication-engine/     # rules chain, pricing, benefits, claim lifecycle
+├── batch-intake/            # 100k-claim batch file: single thread vs thread pool vs virtual threads
 ├── intake-service/          # REST intake with idempotency keys (Postgres + Redis)
 ├── config/checkstyle/       # code style rules
 ├── docker-compose.yml       # local stack
@@ -54,7 +58,7 @@ claimstream/
 | M0 | Big picture & setup | ✅ |
 | M1 | Domain model (OOD) | ✅ |
 | M2 | Adjudication rules engine (design patterns) | ✅ |
-| M3 | Batch intake (multi-threading) | |
+| M3 | Batch intake (multi-threading) | ✅ |
 | M4 | Idempotency & concurrency correctness | ✅ |
 | M5 | Event-driven services (Kafka, outbox) | |
 | M6 | Reliability (timeouts, retries, circuit breaker, gRPC) | |
