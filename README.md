@@ -16,6 +16,10 @@ Prerequisites: JDK 21, Docker Desktop running.
 docker compose up -d --build  # Postgres, Redis, Kafka + Intake Service
 curl -s localhost:8080/actuator/health
 curl -s localhost:8080/api/v1/platform
+# M4: submit CLM-5002; run it twice and the second answer says Idempotent-Replayed: true
+curl -i -X POST localhost:8080/api/v1/claims -H 'Content-Type: application/json' -H 'Idempotency-Key: maria-5002' \
+  -d '{"claimId":"CLM-5002","memberId":"M-1001","providerNpi":"1234567890","dateOfService":"2026-10-20",
+       "lines":[{"lineNumber":1,"cptCode":"99213","billed":150.00}]}'
 docker compose down
 
 # M3: batch intake benchmark (100k claims through 3 threading models)
@@ -37,7 +41,7 @@ claimstream/
 ├── claims-domain/           # plain-Java domain model: Money, Member, Claim...
 ├── adjudication-engine/     # rules chain, pricing, benefits, claim lifecycle
 ├── batch-intake/            # 100k-claim batch file: single thread vs thread pool vs virtual threads
-├── intake-service/          # front door for claims (more services from M5)
+├── intake-service/          # REST intake with idempotency keys (Postgres + Redis)
 ├── config/checkstyle/       # code style rules
 ├── docker-compose.yml       # local stack
 ├── .github/workflows/ci.yml # CI: style → compile → tests → image
@@ -55,7 +59,7 @@ claimstream/
 | M1 | Domain model (OOD) | ✅ |
 | M2 | Adjudication rules engine (design patterns) | ✅ |
 | M3 | Batch intake (multi-threading) | ✅ |
-| M4 | Idempotency & concurrency correctness | |
+| M4 | Idempotency & concurrency correctness | ✅ |
 | M5 | Event-driven services (Kafka, outbox) | |
 | M6 | Reliability (timeouts, retries, circuit breaker, gRPC) | |
 | M7 | Distributed transactions (saga) | |

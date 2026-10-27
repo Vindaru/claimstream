@@ -12,6 +12,7 @@ questions, quizzes) live in [`docs/lessons/`](lessons/). Design decisions live i
 | M1 | Domain model, entities vs value objects, immutability, SOLID | [M1-domain-model.md](lessons/M1-domain-model.md) |
 | M2 | Rules engine: Chain of Responsibility, Strategy, Factory, State | [M2-rules-engine.md](lessons/M2-rules-engine.md) |
 | M3 | Batch intake: thread pools, backpressure, virtual threads, race conditions | [M3-batch-intake.md](lessons/M3-batch-intake.md) |
+| M4 | Idempotency keys, race conditions, Redis SETNX, unique constraints, locking | [M4-idempotency.md](lessons/M4-idempotency.md) |
 
 ---
 
@@ -196,3 +197,37 @@ MALFORMED 100. Race demo: 4 threads × 1M `count++` lost 1.28M updates; `LongAdd
 - **Same input → same counts**, whatever the threading. Test that.
 
 ADR: [0005-batch-intake-concurrency.md](adr/0005-batch-intake-concurrency.md)
+
+## M4 – Idempotency & Concurrency Correctness
+
+**Summary.** The Intake Service gets its first real endpoint: `POST /api/v1/claims` with a required
+`Idempotency-Key` header. The body is validated by building the M1 `Claim`. **Redis `SET NX`** lets one caller per key
+through in about a millisecond; **Postgres primary keys** on `claims` and `idempotency_keys` (inserted in one
+transaction) are the real guarantee, and keep working when Redis is down. The answer is stored with a hash of the
+request, so retries are replayed (`Idempotent-Replayed: true`), a reused key with a different body gets 422, and the
+same claim under a new key gets 409. Schema is managed by Flyway.
+
+**Flow**
+
+```mermaid
+flowchart LR
+    C[Client retries x50] --> V[validate → Claim] --> R{Redis SETNX}
+    R -- "1 winner" --> PG[(INSERT claim + key<br/>one transaction)]
+    R -- "49 losers" --> L[409 in progress / replay]
+    PG --> OK[201 + answer cached]
+```
+
+**Results:** 50 simultaneous CLM-5002 requests → 1 created, 49 × `409 REQUEST_IN_PROGRESS`, **1 row** in `claims`.
+With Redis forced down: still 1 row. Check-then-insert without a constraint (`RaceConditionTest`): 2 rows.
+
+**Remember cards**
+- **Idempotent** = N times has the same effect as once. `POST` needs a key to get there.
+- **The client picks the Idempotency-Key** before the first attempt and reuses it on every retry.
+- **Check-then-insert is a race**; a unique constraint is atomic.
+- **Redis SETNX = fast gate; Postgres unique constraint = guarantee.**
+- **Store the response with a request hash**: same body → replay; different body → 422.
+- **Pessimistic** = lock first (`FOR UPDATE`); **optimistic** = version check, retry on conflict.
+- **Intake idempotency ≠ business duplicate** (M2's `DuplicateClaimRule`).
+- **Test races on purpose**: latch or barrier, assert on the database.
+
+ADR: [0006-idempotent-claim-intake.md](adr/0006-idempotent-claim-intake.md)
