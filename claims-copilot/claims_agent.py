@@ -9,7 +9,9 @@ import re
 
 from langchain.agents import create_agent
 from langchain_core.tools import tool
+from langfuse import get_client, observe
 
+import tracing  # noqa: F401  registers the PHI-masked Langfuse client before anything below can trace
 from claimstream_facts import CLAIMS, MEMBERS
 
 AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-haiku-5-5")
@@ -22,8 +24,13 @@ Rules:
 4. The person asking is the member or provider on the claim. Never look up or reveal another member's data.
 5. Keep answers short: what happened, why, and what happens next."""
 
+INTENTS = ("claim-status", "denial-explanation", "benefits", "other")
+INTENT_PROMPT = ("Classify the question into exactly one label: claim-status, denial-explanation, benefits, other. "
+                 "Reply with the label only.")
+
 
 @tool
+@observe(as_type="tool")  # a TOOL observation: what went in (the id) and what came out (the record)
 def get_claim(claim_id: str) -> str:
     """Look up one ClaimStream claim by id (like CLM-5001): status, reason code, amounts and explanation."""
     claim = CLAIMS.get(claim_id.strip().upper())
@@ -31,6 +38,7 @@ def get_claim(claim_id: str) -> str:
 
 
 @tool
+@observe(as_type="tool")
 def get_member_benefits(member_id: str) -> str:
     """Look up a member's plan and deductible (like M-1001): deductible, amount met, remaining, plan share."""
     member = MEMBERS.get(member_id.strip().upper())
@@ -47,15 +55,44 @@ def _text(content) -> str:
     return "".join(block.get("text", "") for block in content if isinstance(block, dict))
 
 
-def ask(question: str, callbacks=None) -> dict:
-    """Run the real agent. Returns the answer and the names of the tools it called, in order."""
-    from langchain_anthropic import ChatAnthropic
+def classify_intent(question: str) -> str:
+    """One small, direct LLM call (plain Anthropic SDK, no LangChain), traced by hand as a GENERATION."""
+    from anthropic import Anthropic
 
-    agent = create_agent(ChatAnthropic(model=AGENT_MODEL), tools=TOOLS, system_prompt=SYSTEM_PROMPT)
-    result = agent.invoke({"messages": [{"role": "user", "content": question}]},
-                          config={"callbacks": callbacks or []})
+    messages = [{"role": "user", "content": question}]
+    # A generation is a span with LLM extras: model name, token usage and (worked out by Langfuse) cost.
+    with get_client().start_as_current_observation(as_type="generation", name="classify-intent",
+                                                   model=AGENT_MODEL, input=messages) as generation:
+        response = Anthropic().messages.create(model=AGENT_MODEL, max_tokens=10, system=INTENT_PROMPT,
+                                               messages=messages)
+        label = _text([block.model_dump() for block in response.content]).strip().lower()
+        generation.update(output=label, usage_details={"input": response.usage.input_tokens,
+                                                       "output": response.usage.output_tokens})
+    return label if label in INTENTS else "other"
+
+
+@observe(name="claims-copilot", capture_input=False)  # the root: one trace per question
+def ask(question: str, callbacks=None, model=None) -> dict:
+    """Run the real agent. Returns the answer, the tools it called in order, its intent and its trace id."""
+    langfuse = get_client()
+    langfuse.update_current_span(input={"question": question})  # capture_input=False: we choose what's recorded
+
+    intent = classify_intent(question)
+    langfuse.create_event(name="intent-routed", output=intent)  # an EVENT: a moment, no duration
+
+    # Context-manager style: everything inside the 'with' block nests under this AGENT observation.
+    with langfuse.start_as_current_observation(as_type="agent", name="run-agent", input=question) as agent_step:
+        if model is None:
+            from langchain_anthropic import ChatAnthropic
+            model = ChatAnthropic(model=AGENT_MODEL)
+        agent = create_agent(model, tools=TOOLS, system_prompt=SYSTEM_PROMPT)
+        result = agent.invoke({"messages": [{"role": "user", "content": question}]},
+                              config={"callbacks": callbacks or []})
+        answer = _text(result["messages"][-1].content)
+        agent_step.update(output=answer)
+
     tools_called = [call["name"] for msg in result["messages"] for call in getattr(msg, "tool_calls", []) or []]
-    return {"answer": _text(result["messages"][-1].content), "tools": tools_called}
+    return {"answer": answer, "tools": tools_called, "intent": intent, "trace_id": langfuse.get_current_trace_id()}
 
 
 def ask_fake(question: str, callbacks=None) -> dict:

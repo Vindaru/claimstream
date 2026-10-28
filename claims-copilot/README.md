@@ -48,6 +48,8 @@ golden_set.jsonl ──► claims_agent.ask() ──► answer + tools used
 | `tracing.py` | The one Langfuse client, with PHI masking (names, member IDs, DOBs) always on |
 | `hello_langfuse.py` | Phase 0 hello-world trace |
 | `test_phi_masking.py` | Proves no PHI reaches Langfuse (in-memory exporter, no keys needed) |
+| `trace_one_claim.py` | Phase 1: one real question, printed with a link to its full trace |
+| `test_trace_shape.py` | Proves the trace tree stays the same shape (fake LLM, no keys needed) |
 
 The step-by-step learning log is in [`docs/LANGFUSE_LEARNING.md`](../docs/LANGFUSE_LEARNING.md).
 

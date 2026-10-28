@@ -6,6 +6,7 @@ batches anything up and sends it over the network.
 
 Even our synthetic data is masked. The habit is the point: the day a real claim flows through, it's already safe.
 """
+import os
 import re
 
 from langfuse import Langfuse
@@ -46,7 +47,14 @@ def mask_phi(*, data, **kwargs):
 def get_langfuse(**overrides) -> Langfuse:
     """The Langfuse client for this app. Keys and URL come from the environment (.env), never from code.
 
-    The first client created becomes the process-wide default, so LangChain's CallbackHandler and
-    langfuse.get_client() reuse this one, mask included.
+    Langfuse keeps one set of settings per public key, and the FIRST client created for a key wins, mask included.
+    @observe, get_client() and LangChain's CallbackHandler all reuse it.
     """
     return Langfuse(mask=mask_phi, **overrides)
+
+
+# Register the masked client the moment this module is imported. If @observe or get_client() ran first, they would
+# create an unmasked client for the same key, and a later get_langfuse() could not add the mask back.
+# With no key there is nothing to send (offline runs), so there is nothing to protect yet.
+if os.getenv("LANGFUSE_PUBLIC_KEY"):
+    get_langfuse()

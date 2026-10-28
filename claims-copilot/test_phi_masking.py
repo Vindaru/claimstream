@@ -4,13 +4,13 @@ instead of the Langfuse server, and we search everything that *would* have been 
   python -m pytest -q test_phi_masking.py
 """
 import json
-
-import pytest
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+import os
+import subprocess
+import sys
 
 from claimstream_facts import MEMBERS
 from claims_agent import get_member_benefits
-from tracing import mask_phi, get_langfuse
+from tracing import mask_phi
 
 LEAKS = ["Maria", "Lopez", "James", "Chen", "M-1001", "M-2002", "1985-03-14", "1979-11-02"]
 
@@ -26,21 +26,6 @@ def test_masks_phi_keys_anywhere_in_nested_data():
     assert masked["claim"] == {"member_id": "[REDACTED]", "billed": 150.0}
     assert masked["members"][0]["name"] == "[REDACTED]" and masked["members"][0]["dob"] == "[REDACTED]"
     assert masked["members"][0]["deductible_remaining"] == 40.0  # non-PHI facts stay useful for debugging
-
-
-@pytest.fixture(scope="module")
-def client():
-    # One client per test run: shutting a client down also stops the shared OpenTelemetry pipeline behind it.
-    exporter = InMemorySpanExporter()
-    langfuse = get_langfuse(public_key="pk-lf-test", secret_key="sk-lf-test", span_exporter=exporter)
-    yield langfuse, exporter
-    langfuse.shutdown()
-
-
-@pytest.fixture
-def exported(client):
-    client[1].clear()
-    return client
 
 
 def everything_sent(exporter):
@@ -70,3 +55,17 @@ def test_langchain_tool_call_is_masked_too(exported):
     sent = everything_sent(exporter)
     assert "get_member_benefits" in sent and "deductible_remaining" in sent
     assert not [leak for leak in LEAKS if leak in sent]
+
+
+def test_masked_client_is_registered_when_the_agent_is_imported():
+    """Langfuse keeps the FIRST client's settings per key. Importing the agent must register the masked one first,
+    or a stray get_client() / @observe could create an unmasked client that wins. Runs in a fresh process."""
+    check = ("import claims_agent\n"
+             "from langfuse import get_client\n"
+             "get_client()\n"  # a stray early call, like an @observe'd function running before any setup
+             "from langfuse._client.resource_manager import LangfuseResourceManager\n"  # internal, test-only peek
+             "from tracing import mask_phi\n"
+             "assert LangfuseResourceManager._instances['pk-lf-order'].mask is mask_phi")
+    env = {**os.environ, "LANGFUSE_PUBLIC_KEY": "pk-lf-order", "LANGFUSE_SECRET_KEY": "sk-lf-order",
+           "LANGFUSE_BASE_URL": "http://127.0.0.1:9", "LANGFUSE_TRACING_ENABLED": "false"}
+    subprocess.run([sys.executable, "-c", check], env=env, cwd=os.path.dirname(__file__), check=True)
