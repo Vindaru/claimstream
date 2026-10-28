@@ -28,8 +28,9 @@ def reason_code(*, output, expected_output, **kwargs):
 
 
 def must_mention(*, output, expected_output, **kwargs):
-    wanted = expected_output["must_mention"]
-    missing = [w for w in wanted if w.lower() not in output["answer"].lower()]
+    wanted, answer = expected_output["must_mention"], output["answer"].lower()
+    # "a|b" means either spelling counts, e.g. "2026-09-30|September 30, 2026"
+    missing = [w for w in wanted if not any(alt.lower() in answer for alt in w.split("|"))]
     value = 1.0 if not wanted else (len(wanted) - len(missing)) / len(wanted)
     return Evaluation(name="must_mention", value=value, comment=f"missing {missing}" if missing else "all present")
 

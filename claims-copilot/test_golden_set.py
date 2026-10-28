@@ -1,4 +1,8 @@
-"""The same golden set as a pytest suite, for CI: one test per case.  Run: python -m pytest -q test_golden_set.py"""
+"""The same golden set as a pytest suite, for CI: one test per case. It calls real Claude, so it costs money and
+only runs when you ask for it:
+
+  RUN_LLM_TESTS=1 python -m pytest -q test_golden_set.py
+"""
 import os
 
 import pytest
@@ -7,7 +11,8 @@ import claims_agent
 from evaluators import DETERMINISTIC, llm_judge
 from run_evals import JUDGE_PASS, as_item, load_golden_set
 
-pytestmark = pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="needs ANTHROPIC_API_KEY")
+pytestmark = pytest.mark.skipif(not (os.getenv("RUN_LLM_TESTS") and os.getenv("ANTHROPIC_API_KEY")),
+                                reason="calls real Claude: set RUN_LLM_TESTS=1 and ANTHROPIC_API_KEY")
 
 
 @pytest.mark.parametrize("case", load_golden_set(), ids=lambda c: c["id"])

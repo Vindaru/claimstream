@@ -1,8 +1,16 @@
 """Shared test fixture: one Langfuse client that exports to memory instead of a server (no keys, no network)."""
-import pytest
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+import os
 
-from tracing import get_langfuse
+# Tests never send to a real Langfuse. Drop the keys BEFORE anything imports tracing.py: with keys loaded from
+# .env, tracing.py would register a real client too, and with two clients Langfuse's @observe refuses to pick
+# one ("multiple langfuse clients ... skipping tracing") and the trace tests see nothing.
+for _var in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
+    os.environ.pop(_var, None)
+
+import pytest  # noqa: E402
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter  # noqa: E402
+
+from tracing import get_langfuse  # noqa: E402
 
 
 @pytest.fixture(scope="session")
