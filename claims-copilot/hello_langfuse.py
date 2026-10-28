@@ -9,7 +9,13 @@ from tracing import get_langfuse
 langfuse = get_langfuse()
 
 # auth_check() makes one real HTTP call. Fail fast with a clear message instead of silently losing traces.
-if not langfuse.auth_check():
+# It returns False when keys are missing, but raises (e.g. 401 UnauthorizedError) when the server rejects them.
+try:
+    authorized = langfuse.auth_check()
+except Exception as error:
+    authorized = False
+    print(f"Langfuse said: {error}")
+if not authorized:
     raise SystemExit("Langfuse rejected the keys or URL. Check LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, "
                      "LANGFUSE_BASE_URL in .env")
 
