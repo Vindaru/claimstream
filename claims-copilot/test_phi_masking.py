@@ -1,7 +1,7 @@
 """PHI must never reach Langfuse. These tests need no keys and no network: spans go to an in-memory exporter
 instead of the Langfuse server, and we search everything that *would* have been sent.
 
-  pytest -q test_phi_masking.py
+  python -m pytest -q test_phi_masking.py
 """
 import json
 

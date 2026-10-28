@@ -1,4 +1,4 @@
-"""The same golden set as a pytest suite, for CI: one test per case.  Run: pytest -q test_golden_set.py"""
+"""The same golden set as a pytest suite, for CI: one test per case.  Run: python -m pytest -q test_golden_set.py"""
 import os
 
 import pytest

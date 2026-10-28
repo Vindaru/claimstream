@@ -76,7 +76,7 @@ cd claims-copilot
 uv venv --python 3.12 && source .venv/bin/activate   # Langfuse SDK v5 needs Python 3.11+
 uv pip install -r requirements.txt
 cp .env.example .env                                  # then paste your real keys into .env
-pytest -q test_phi_masking.py                         # 4 passed: PHI masking works, no keys needed
+python -m pytest -q test_phi_masking.py               # 4 passed: PHI masking works, no keys needed
 ```
 
 ### Step A: offline first (no key, no cost, 10 seconds)
@@ -122,7 +122,7 @@ What happens:
 Then open Langfuse → **Datasets → claimstream-golden-v1 → Runs**. Each run is a column; change the prompt or model,
 run again, and compare side by side. That's regression testing for AI.
 
-For CI style: `pytest -q test_golden_set.py`.
+For CI style: `python -m pytest -q test_golden_set.py`.
 
 ---
 
