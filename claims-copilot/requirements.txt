@@ -1,0 +1,6 @@
+# Pinned so every run (your Mac, CI) uses the same versions. Checked against PyPI on 2026-10-28.
+langfuse==5.0.4            # tracing, prompts, datasets, experiments (needs Python >= 3.11)
+langchain==1.4.7           # create_agent: the agent loop
+langchain-anthropic==1.7.7 # ChatAnthropic: Claude as the LLM
+deepeval==4.3.2            # GEval: the LLM-as-a-judge
+pytest==9.2.0
