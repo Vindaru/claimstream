@@ -6,6 +6,7 @@ batches anything up and sends it over the network.
 
 Even our synthetic data is masked. The habit is the point: the day a real claim flows through, it's already safe.
 """
+import dataclasses
 import os
 import re
 
@@ -41,7 +42,15 @@ def mask_phi(*, data, **kwargs):
         data = DOB.sub(lambda m: f"{m.group(1)}{m.group(2)}[DOB]", data)
         data = MEMBER_ID.sub("[MEMBER_ID]", data)
         return MEMBER_NAME.sub("[NAME]", data)
-    return data  # numbers, booleans, None: nothing to hide
+    if data is None or isinstance(data, (bool, int, float)):
+        return data  # nothing to hide
+    # Objects: LangChain messages (pydantic) and LangGraph updates (dataclasses) arrive as objects, not dicts.
+    # Turn them into plain data and mask that. Anything else is masked as text: for PHI we fail closed.
+    if hasattr(data, "model_dump"):
+        return mask_phi(data=data.model_dump())
+    if dataclasses.is_dataclass(data) and not isinstance(data, type):
+        return mask_phi(data={f.name: getattr(data, f.name) for f in dataclasses.fields(data)})
+    return mask_phi(data=str(data))
 
 
 def get_langfuse(**overrides) -> Langfuse:

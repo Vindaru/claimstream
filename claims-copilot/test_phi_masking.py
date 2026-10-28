@@ -69,3 +69,27 @@ def test_masked_client_is_registered_when_the_agent_is_imported():
     env = {**os.environ, "LANGFUSE_PUBLIC_KEY": "pk-lf-order", "LANGFUSE_SECRET_KEY": "sk-lf-order",
            "LANGFUSE_BASE_URL": "http://127.0.0.1:9", "LANGFUSE_TRACING_ENABLED": "false"}
     subprocess.run([sys.executable, "-c", check], env=env, cwd=os.path.dirname(__file__), check=True)
+
+
+def test_full_agent_trace_has_no_phi(monkeypatch, exported):
+    """End to end: the LLM generations recorded by the LangChain callback include the whole conversation, tool
+    results included. Maria's record passes through the agent and must still arrive masked."""
+    import anthropic
+    from langchain_core.messages import AIMessage
+
+    import claims_agent
+    from test_trace_shape import FakeAnthropic, ScriptedLLM
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    langfuse, exporter = exported
+    llm = ScriptedLLM(responses=[
+        AIMessage(content="", tool_calls=[{"name": "get_member_benefits", "args": {"member_id": "M-1001"},
+                                           "id": "call-1"}]),
+        AIMessage(content="Maria Lopez (M-1001), you have $40 of your deductible left."),
+    ])
+    claims_agent.ask("I'm Maria Lopez, member M-1001, DOB 1985-03-14. How much deductible is left?", model=llm)
+    langfuse.flush()
+
+    sent = everything_sent(exporter)
+    assert "deductible_remaining" in sent  # the tool result really is in the trace...
+    assert not [leak for leak in LEAKS if leak in sent]  # ...but without the PHI

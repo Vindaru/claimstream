@@ -31,6 +31,14 @@ def as_item(case):
             "metadata": {"id": case["id"], "category": case["category"], "persona": case["persona"]}}
 
 
+def _auth_ok(langfuse):
+    try:
+        return langfuse.auth_check()
+    except Exception as error:  # a 401 raises instead of returning False
+        print(f"Langfuse rejected the keys, running without it: {error}")
+        return False
+
+
 def main():
     args = argparse.ArgumentParser()
     args.add_argument("--fake", action="store_true", help="use the offline fake copilot")
@@ -42,16 +50,12 @@ def main():
     if not os.getenv("LANGFUSE_PUBLIC_KEY"):
         logging.getLogger("langfuse").setLevel(logging.CRITICAL)  # offline: no Langfuse server, keep output clean
     langfuse = get_langfuse()  # the masked client: PHI never leaves this process
-    online = bool(os.getenv("LANGFUSE_PUBLIC_KEY")) and langfuse.auth_check()
+    online = bool(os.getenv("LANGFUSE_PUBLIC_KEY")) and _auth_ok(langfuse)
     items = [as_item(c) for c in load_golden_set()]
 
     def task(*, item, **kwargs):
         question = item["input"] if isinstance(item, dict) else item.input
-        handler = None
-        if online and not opts.fake:
-            from langfuse.langchain import CallbackHandler
-            handler = [CallbackHandler()]  # nests the agent's LLM and tool calls under this item's trace
-        return ask(question, callbacks=handler)
+        return ask(question)  # ask() attaches the Langfuse LangChain callback itself
 
     data = items
     if online:  # upload the golden set as a Langfuse dataset, so runs can be compared side by side

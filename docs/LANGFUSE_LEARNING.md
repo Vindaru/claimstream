@@ -285,3 +285,121 @@ a written reason, and never loosen a case just to get green.
 
 Also changed: the golden-set pytest calls real Claude, so it now runs only with `RUN_LLM_TESTS=1`. A plain
 `python -m pytest -q` is always free.
+
+---
+
+## Phase 2: LangChain integration (the callback handler)
+
+### What we built
+
+- `ask()` now passes Langfuse's LangChain `CallbackHandler` into the agent, so everything inside the agent loop is
+  recorded automatically: each LangGraph node, each Claude call (as a generation with tokens) and each tool call.
+- Removed the manual `@observe` from the tools: the callback already records them, and keeping both made every tool
+  appear twice.
+- `run_evals.py` no longer adds its own handler (that would also double everything).
+- `trace_one_claim.py --manual-only` turns the callback off, so you can compare the Phase 1 and Phase 2 views.
+- `tracing.py`: masking now also handles objects (LangChain messages, LangGraph updates). See the gotcha below.
+- Tests: the callback adds 2 LLM calls and exactly 1 tool span under `run-agent`; manual-only can't see inside; and an
+  end-to-end test that a full agent trace with Maria's record has no PHI.
+
+### The tree now
+
+```
+claims-copilot                 SPAN        ours (@observe)
+├── classify-intent            GENERATION  ours (context manager)
+├── intent-routed              EVENT       ours
+└── run-agent                  AGENT       ours (context manager)
+    └── LangGraph              CHAIN       callback: the whole agent graph
+        ├── model              CHAIN       callback: graph node "call the LLM"
+        │   └── ChatAnthropic  GENERATION  callback: Claude decides to call get_claim (tokens, cost)
+        ├── tools              CHAIN       callback: graph node "run tools"
+        │   └── get_claim      TOOL        callback: CLM-5002 in, record out
+        └── model              CHAIN
+            └── ChatAnthropic  GENERATION  callback: Claude reads the record and writes the answer
+```
+
+### Why
+
+The agent loop is where most bugs live: which tool the LLM picked, with which arguments, what it was shown, and how
+many round trips it took. We don't own LangChain's code, so we can't put `@observe` inside it. The callback is
+LangChain's official hook: LangChain announces every step ("LLM started", "tool ended") and Langfuse's handler turns
+each announcement into an observation. QA analogy: a test framework's listener (like a TestNG/JUnit listener) that
+logs every step without you editing each test.
+
+### Callback vs manual: when to use which
+
+| | Callback handler | Manual (`@observe`, context managers) |
+|---|---|---|
+| Effort | One line | One decorator or `with` per step |
+| Sees inside the framework | ✅ every node, LLM call, tool call | ❌ only what you wrap |
+| Control over names and fields | Limited (framework names like `model`, `tools`) | Full |
+| Works without LangChain | ❌ | ✅ any Python code |
+| We use it for | The agent loop | The root, intent classification, the agent boundary |
+
+Most real systems mix both, like we do: manual spans for your business steps, the callback for the framework.
+Watch for doubles: tracing the same step both ways records it twice.
+
+### Key code, one line each
+
+```python
+handlers = ([CallbackHandler()] if langchain_tracing else []) + list(callbacks or [])
+```
+Build the callback list: Langfuse's handler (unless switched off) plus any extra callbacks a caller passes.
+
+```python
+result = agent.invoke({"messages": [...]}, config={"callbacks": handlers})
+```
+LangChain passes the callbacks down to every node, LLM call and tool call inside the agent.
+
+```python
+if hasattr(data, "model_dump"):
+    return mask_phi(data=data.model_dump())
+```
+LangChain messages are objects. Turn them into plain data so the mask can see inside them.
+
+```python
+return mask_phi(data=str(data))
+```
+Unknown object type: mask its text form anyway. For PHI we fail closed.
+
+### What you should see in the Langfuse UI
+
+Run `python trace_one_claim.py`, open the link:
+1. Under `run-agent`: `LangGraph` → `model` → `ChatAnthropic` (generation) → `tools` → `get_claim` → `model` →
+   `ChatAnthropic`.
+2. Click the first `ChatAnthropic`: input shows the system prompt and the question; output shows a tool call
+   `get_claim` with `claim_id: CLM-5002`. That's the LLM *deciding*.
+3. Click the second `ChatAnthropic`: its input now includes the tool result. That's the LLM *reading*.
+4. Each `ChatAnthropic` shows model, input/output tokens and cost. The trace header adds them up.
+5. Run `python trace_one_claim.py --manual-only` and compare: `run-agent` is an empty box again.
+
+### Break it
+
+In `claims_agent.py`, change `get_claim`'s docstring to `"""Look up a member's plan and deductible."""` (the wrong
+description). Run `python trace_one_claim.py`. The LLM picks tools only from their descriptions, so it is likely to
+call the wrong tool, call none, or loop. Open the first `ChatAnthropic` generation: you can see exactly what tool
+descriptions it was shown and which call it chose. Undo the change afterwards.
+
+### Gotcha we hit: masking missed objects
+
+The new end-to-end test failed: `Maria`, `Lopez` and `M-1001` appeared in the `model` node's output. LangGraph
+passes LangChain message *objects* (not dicts or strings) to the callback, and `mask_phi` only knew dicts, lists and
+strings, so it let the objects through untouched. Fix: convert pydantic objects and dataclasses to plain data before
+masking, and mask anything else as text. The test caught it before any real trace was sent. Lesson: test masking on
+the *real* data path, not just on hand-made dicts.
+
+### Interview questions
+
+1. **How does Langfuse trace a LangChain agent without changing LangChain's code?**
+   Through LangChain's callback system. LangChain emits events for every chain, LLM call and tool call; Langfuse's
+   `CallbackHandler` listens and records each as a nested observation, LLM calls as generations with model and tokens.
+   We pass it once in `agent.invoke(config={"callbacks": [...]})` and it reaches every step.
+2. **When would you trace manually instead of using the callback?**
+   For code outside the framework (our intent classifier uses the Anthropic SDK directly), for business-level steps I
+   want named my way, and as the root so every request is one trace. Then the callback fills in the framework detail
+   underneath. I avoid tracing the same step both ways, because it shows up twice.
+3. **Tell me about a bug your observability tests caught.**
+   After adding the LangChain callback, an end-to-end test that runs the agent on a synthetic member's record found
+   the member's name and ID in the trace. The masking function handled dicts and strings but LangGraph passes message
+   objects. I made it convert objects to plain data and fail closed on anything unknown, before a single real trace
+   was sent.
