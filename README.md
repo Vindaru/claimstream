@@ -66,7 +66,7 @@ claimstream/
 ├── adjudication-engine/     # rules chain, pricing, benefits, claim lifecycle
 ├── batch-intake/            # 100k-claim batch file: single thread vs thread pool vs virtual threads
 ├── intake-service/          # REST intake with idempotency keys (Postgres + Redis)
-├── claims-copilot/          # (M8.5) Python LangChain / LangGraph AI agent
+├── claims-copilot/          # Python LangChain agent + Langfuse tracing and evals (docs/LANGFUSE_LEARNING.md)
 ├── config/checkstyle/       # code style rules
 ├── docker-compose.yml       # local stack
 ├── .github/workflows/ci.yml # CI: style → compile → tests → image
