@@ -101,3 +101,29 @@ def test_generation_records_model_and_tokens(spans):
     attrs = named(all_spans, "classify-intent")[0].attributes
     assert attrs["langfuse.observation.model.name"] == claims_agent.AGENT_MODEL
     assert json.loads(attrs["langfuse.observation.usage_details"]) == {"input": 42, "output": 3}
+
+
+def test_trace_context_session_user_tags_metadata(exported):
+    """Phase 3: every observation carries the conversation, the (aliased) user, tags and metadata."""
+    langfuse, exporter = exported
+    result = claims_agent.ask("Why was CLM-5002 denied?", session_id="chat-test-1", member_id="M-1001",
+                              channel="member-portal", fake=True)
+    langfuse.flush()
+    all_spans = exporter.get_finished_spans()
+    root = named(all_spans, "claims-copilot")[0].attributes
+
+    assert root["session.id"] == "chat-test-1"
+    assert root["user.id"].startswith("u-") and "1001" not in root["user.id"]  # an alias, never the member ID
+    assert set(root["langfuse.trace.tags"]) == {"claims-copilot", "member-portal", "denial-explanation"}
+    assert json.loads(root["langfuse.trace.metadata.claim_ids"]) == "CLM-5002"
+    assert root["langfuse.version"] == claims_agent.APP_VERSION
+    assert all(s.attributes.get("session.id") == "chat-test-1" for s in all_spans)  # children carry it too
+    assert result["intent"] == "denial-explanation" and result["tools"] == ["get_claim"]
+
+
+def test_fake_mode_answers_without_any_api_key(exported):
+    """fake=True runs the real agent and tools with free stand-ins: this is what the demos use by default."""
+    for question, tool in [("What's going on with CLM-5005?", "get_claim"),
+                           ("How much deductible is left? I'm M-1001.", "get_member_benefits")]:
+        result = claims_agent.ask(question, fake=True)
+        assert result["tools"] == [tool] and result["answer"]

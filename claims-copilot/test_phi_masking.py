@@ -87,9 +87,19 @@ def test_full_agent_trace_has_no_phi(monkeypatch, exported):
                                            "id": "call-1"}]),
         AIMessage(content="Maria Lopez (M-1001), you have $40 of your deductible left."),
     ])
-    claims_agent.ask("I'm Maria Lopez, member M-1001, DOB 1985-03-14. How much deductible is left?", model=llm)
+    claims_agent.ask("I'm Maria Lopez, member M-1001, DOB 1985-03-14. How much deductible is left?", model=llm,
+                     session_id="chat-phi", member_id="M-1001")
     langfuse.flush()
 
     sent = everything_sent(exporter)
     assert "deductible_remaining" in sent  # the tool result really is in the trace...
     assert not [leak for leak in LEAKS if leak in sent]  # ...but without the PHI
+
+
+def test_user_alias_is_stable_and_not_reversible_by_eye():
+    from tracing import pseudonymous_user_id
+
+    alias = pseudonymous_user_id("M-1001")
+    assert alias == pseudonymous_user_id(" m-1001 ")  # same member, same alias: Langfuse can group their traces
+    assert alias != pseudonymous_user_id("M-2002") and "1001" not in alias
+    assert pseudonymous_user_id(None) is None

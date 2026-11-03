@@ -48,7 +48,9 @@ golden_set.jsonl ──► claims_agent.ask() ──► answer + tools used
 | `tracing.py` | The one Langfuse client, with PHI masking (names, member IDs, DOBs) always on |
 | `hello_langfuse.py` | Phase 0 hello-world trace |
 | `test_phi_masking.py` | Proves no PHI reaches Langfuse (in-memory exporter, no keys needed) |
-| `trace_one_claim.py` | Phase 1: one real question, printed with a link to its full trace |
+| `trace_one_claim.py` | Phases 1-2: one question, printed with a link to its full trace (free fake by default, `--live` for Claude) |
+| `demo_conversation.py` | Phase 3: two conversations with sessions, user aliases, tags and metadata (free by default) |
+| `fakes.py` | Free rule-based stand-ins for Claude: same agent, tools and trace shape, $0 |
 | `test_trace_shape.py` | Proves the trace tree stays the same shape (fake LLM, no keys needed) |
 
 The step-by-step learning log is in [`docs/LANGFUSE_LEARNING.md`](../docs/LANGFUSE_LEARNING.md).
@@ -69,6 +71,9 @@ The step-by-step learning log is in [`docs/LANGFUSE_LEARNING.md`](../docs/LANGFU
 
 ## 3. Run it
 
+**Cost rule:** every script is free by default (a rule-based fake replaces Claude). Only `--live` or `RUN_LLM_TESTS=1`
+calls real Claude and spends money.
+
 ### Step 0: set up (once)
 
 From the repo root:
@@ -85,7 +90,7 @@ python -m pytest -q test_phi_masking.py               # 4 passed: PHI masking wo
 
 ```bash
 python build_golden_set.py
-python run_evals.py --fake
+python run_evals.py               # free by default: fake copilot, no API calls
 ```
 
 Real output from the fake "lazy student":
@@ -119,7 +124,7 @@ Start Langfuse (self-hosted with `docker compose up -d`, or use Langfuse Cloud),
 ```bash
 set -a && source .env && set +a           # your Langfuse keys + ANTHROPIC_API_KEY
 python hello_langfuse.py                  # one masked trace, proves the connection
-python run_evals.py
+python run_evals.py --live                # COSTS MONEY: real Claude copilot + Claude judge
 ```
 
 What happens:
@@ -137,7 +142,7 @@ For CI style (calls real Claude, costs a few cents): `RUN_LLM_TESTS=1 python -m 
 
 ## 4. Break it on purpose 🔨 (this is where you learn)
 
-Run `python run_evals.py` after each change, read which grader catches it, then undo.
+Run `python run_evals.py --live` after each change (costs money; most exercises also show up free in the fake run), read which grader catches it, then undo.
 
 1. **Hallucination:** in `claims_agent.py` delete rule 1 from `SYSTEM_PROMPT` ("Only state facts..."). Watch
    `false-premise-01` and the judge's comment. Does the copilot start inventing causes?
@@ -148,7 +153,7 @@ Run `python run_evals.py` after each change, read which grader catches it, then 
 4. **Brittle string check:** while I built this lab, `must_not_say: ["denied"]` failed on the *correct* sentence
    "The claim is **not denied**". That's why the list now holds `"was denied"`, `"is denied"`. Lesson: string checks
    are fast but dumb; that's what the judge is for.
-5. **Different model:** `AGENT_MODEL=claude-sonnet-5-5 python run_evals.py`. Compare the two runs in
+5. **Different model:** `AGENT_MODEL=claude-sonnet-5-5 python run_evals.py --live`. Compare the two runs in
    Langfuse: score, latency, cost. That's how you pick a model with evidence.
 6. **Judge drift:** run the same thing 3 times. Do judge scores move? Real teams fix that with tight rubrics, a fixed judge model and by checking the judge against human labels.
 

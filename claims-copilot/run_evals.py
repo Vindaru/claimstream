@@ -1,7 +1,7 @@
 """End-to-end eval: every golden case -> the copilot -> all graders -> a scorecard (and Langfuse, if running).
 
-  python run_evals.py --fake        # offline: fake copilot, no API key, no cost (judge skipped)
-  python run_evals.py               # real copilot + Claude judge; scores and traces go to Langfuse
+  python run_evals.py               # free: fake copilot, no API calls (judge skipped)
+  python run_evals.py --live        # real copilot + Claude judge: COSTS MONEY; scores and traces go to Langfuse
 
 Exits with code 1 if any case fails, so it can gate a CI pipeline.
 """
@@ -41,12 +41,13 @@ def _auth_ok(langfuse):
 
 def main():
     args = argparse.ArgumentParser()
-    args.add_argument("--fake", action="store_true", help="use the offline fake copilot")
+    args.add_argument("--live", action="store_true", help="call real Claude (costs money); default is the free fake")
     args.add_argument("--no-judge", action="store_true", help="skip the LLM judge")
     opts = args.parse_args()
 
+    opts.fake = not opts.live
     ask = claims_agent.ask_fake if opts.fake else claims_agent.ask
-    use_judge = not opts.no_judge and bool(os.getenv("ANTHROPIC_API_KEY"))
+    use_judge = opts.live and not opts.no_judge and bool(os.getenv("ANTHROPIC_API_KEY"))
     if not os.getenv("LANGFUSE_PUBLIC_KEY"):
         logging.getLogger("langfuse").setLevel(logging.CRITICAL)  # offline: no Langfuse server, keep output clean
     langfuse = get_langfuse()  # the masked client: PHI never leaves this process

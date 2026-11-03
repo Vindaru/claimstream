@@ -7,6 +7,8 @@ batches anything up and sends it over the network.
 Even our synthetic data is masked. The habit is the point: the day a real claim flows through, it's already safe.
 """
 import dataclasses
+import hashlib
+import hmac
 import os
 import re
 
@@ -51,6 +53,18 @@ def mask_phi(*, data, **kwargs):
     if dataclasses.is_dataclass(data) and not isinstance(data, type):
         return mask_phi(data={f.name: getattr(data, f.name) for f in dataclasses.fields(data)})
     return mask_phi(data=str(data))
+
+
+# Salt for user aliases. Keep the real one in .env (USER_ID_SALT); this default is for local learning only.
+_USER_ID_SALT = os.getenv("USER_ID_SALT", "local-dev-salt-not-secret").encode()
+
+
+def pseudonymous_user_id(member_id):
+    """A stable alias for a member, e.g. M-1001 -> 'u-3f9a1c2b7d4e'. Same member, same alias, so Langfuse can group
+    a member's traces and costs. Without the salt nobody can turn the alias back into the member ID."""
+    if not member_id:
+        return None
+    return "u-" + hmac.new(_USER_ID_SALT, member_id.strip().upper().encode(), hashlib.sha256).hexdigest()[:12]
 
 
 def get_langfuse(**overrides) -> Langfuse:

@@ -403,3 +403,110 @@ the *real* data path, not just on hand-made dicts.
    the member's name and ID in the trace. The masking function handled dicts and strings but LangGraph passes message
    objects. I made it convert objects to plain data and fail closed on anything unknown, before a single real trace
    was sent.
+
+---
+
+## Phase 3: Context (sessions, users, tags, metadata, version)
+
+### What we built
+
+- `ask()` takes `session_id`, `member_id` and `channel`, and wraps all its work in `propagate_attributes(...)`:
+  session, a user **alias**, tags, metadata and the app version go on every observation in the trace.
+- `tracing.pseudonymous_user_id()`: turns `M-1001` into a stable alias like `u-3f9a1c2b7d4e` (HMAC-SHA256 with a
+  secret salt). The member ID itself never reaches Langfuse.
+- After intent classification, the intent (`denial-explanation`, `claim-status`, `benefits`, `other`) is added as a tag.
+- `demo_conversation.py`: two conversations (a member and a provider, 3 questions each), each with its own session.
+- **Cost safety** (Vinay's API limit was hit on 2026-11-03 in another project): every script is now free by default.
+  `fakes.py` replaces Claude with rule-based stand-ins that use the same agent, tools and trace shape, and send real
+  traces to Langfuse for $0. Real Claude needs `--live` (scripts) or `RUN_LLM_TESTS=1` (pytest). Live calls are capped
+  at 1024 output tokens per call and 10 agent steps per question.
+
+### Why
+
+One trace answers "what happened on this request". Context answers the questions teams actually ask:
+"show me Maria's whole conversation", "which member costs us the most", "all failed denial explanations this week",
+"did version 0.3 get worse than 0.2". QA analogy: tags and metadata are like test case labels and custom fields in
+JIRA/Xray. Without them you can't filter a test run by component, priority or release.
+
+### The vocabulary
+
+| Field | What it is | Our value | QA analogy |
+|---|---|---|---|
+| `session_id` | Groups the traces of one conversation | `chat-1a2b3c4d`, one per chat window | A test suite run |
+| `user_id` | Who asked; enables per-user views and cost | `u-3f9a…` (alias, never `M-1001`) | Tester/account under test |
+| `tags` | Short labels to filter by | `claims-copilot`, `member-portal`, `denial-explanation` | Test labels |
+| `metadata` | Key-value details, searchable | `channel`, `claim_ids` | Custom fields |
+| `version` | Version of the app/agent logic | `claims-copilot-0.3` | Build number |
+| `release` | Version of the deployed code (env `LANGFUSE_RELEASE`) | a git commit like `a8f4e39` | Release tag |
+| `environment` | Where it ran (env `LANGFUSE_TRACING_ENVIRONMENT`) | `local`, later `staging`, `production` | Test environment |
+
+### Key code, one line each
+
+```python
+with propagate_attributes(session_id=session_id, user_id=tracing.pseudonymous_user_id(member_id), tags=[...], metadata={...}, version=APP_VERSION):
+```
+Everything created inside this block carries the context. Call it first, because spans made earlier don't get it.
+
+```python
+with propagate_attributes(tags=[intent]):
+```
+A second, nested block adds the intent tag once we know it. Langfuse merges it into the trace's tags.
+
+```python
+return "u-" + hmac.new(_USER_ID_SALT, member_id.strip().upper().encode(), hashlib.sha256).hexdigest()[:12]
+```
+Same member gives the same alias, so per-user views still work. Without the salt nobody can map it back.
+
+```python
+metadata={"channel": channel, "claim_ids": ",".join(sorted(set(re.findall(r"CLM-\d+", question))))}
+```
+Metadata values must be short strings. Claim IDs are fine; they aren't PHI on their own.
+
+```python
+config={"callbacks": handlers, "recursion_limit": MAX_AGENT_STEPS}
+```
+Cost guard: a confused agent stops after 10 steps instead of looping and paying.
+
+### Why `user_id` is an alias (HIPAA)
+
+`user_id` is stored as a plain attribute, so our mask never sees it, and Langfuse shows it on the Users page, in
+filters and in exports. A member ID is an identifier; next to claim details it becomes PHI. The alias keeps every
+benefit (group traces per member, cost per member) without the identifier. The same rule applies to `session_id`
+and metadata: we only put non-PHI values there (random chat ids, channel, claim ids).
+
+### What you should see in the Langfuse UI
+
+Run `python demo_conversation.py` (free), then:
+1. **Sessions** (left menu): two new sessions. Open the member one: its 3 questions in order, like a chat transcript.
+2. **Users**: one alias like `u-…` with 3 traces. Click it for that member's traces and token totals. The provider
+   conversation has no user, because we passed no member.
+3. **Tracing → Traces**: add the **Tags** column. Filter **Tags** = `denial-explanation`: only those questions remain.
+4. Filter **Metadata** `channel` = `provider-portal`, or search `CLM-5003`.
+5. Open any trace: the header shows session, user, tags, version and environment.
+
+**"All failed denial-explanation traces this week":** Traces → time range **Past 7 days** → **Tags** =
+`denial-explanation` → **Level** = `ERROR`. Save it with **My Views** so it's one click next time. Today "failed"
+means "crashed". In Phase 5 we add scores, and "failed" can also mean "a grader scored it 0".
+
+### Break it
+
+Add `raise TimeoutError("claims database timed out")` as the first line of `get_claim`. Run
+`python demo_conversation.py` (it will stop at the first claim question). Then use the "failed denial-explanation"
+filter above, or filter Level = ERROR: the broken traces appear with their session and user, so you know which
+conversation was hit. Undo the change.
+
+### Interview questions
+
+1. **What's the difference between tags, metadata and a session?**
+   A session groups the traces of one conversation. Tags are short labels for filtering, like the intent
+   `denial-explanation` or the channel. Metadata is key-value detail like `claim_ids`. We set all of them once with
+   `propagate_attributes` at the start of the request, so every observation carries them.
+2. **How do you track per-user behaviour without putting PHI in your observability tool?**
+   Pseudonymise: our `user_id` is an HMAC-SHA256 of the member ID with a secret salt. It's stable, so per-user views
+   and cost work, but it can't be reversed without the salt. Session ids are random, and metadata holds only non-PHI
+   values. The mask covers inputs and outputs; these fields are designed clean from the start.
+3. **A product manager asks "did last week's release make denial explanations worse?" How do you answer with
+   Langfuse?**
+   Filter traces by tag `denial-explanation`, compare the two `version` or `release` values: error rate, latency,
+   cost, and (from Phase 5) the score averages. Because every trace carries version and intent, that's a filter and
+   a chart, not a new logging project.

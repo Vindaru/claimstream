@@ -9,13 +9,16 @@ import re
 
 from langchain.agents import create_agent
 from langchain_core.tools import tool
-from langfuse import get_client, observe
+from langfuse import get_client, observe, propagate_attributes
 from langfuse.langchain import CallbackHandler
 
-import tracing  # noqa: F401  registers the PHI-masked Langfuse client before anything below can trace
+import tracing  # registers the PHI-masked Langfuse client before anything below can trace
 from claimstream_facts import CLAIMS, MEMBERS
 
 AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-haiku-5-5")
+APP_VERSION = "claims-copilot-0.3"  # bump when the bot's behaviour changes; Langfuse can filter and compare by it
+MAX_ANSWER_TOKENS = 1024  # hard cap per Claude call, so one run can never produce a surprise bill
+MAX_AGENT_STEPS = 10  # LangGraph steps per question; stops a confused agent from looping (and paying) forever
 
 SYSTEM_PROMPT = """You are the ClaimStream Claims Copilot. You explain claim decisions in plain English.
 Rules:
@@ -71,32 +74,53 @@ def classify_intent(question: str) -> str:
 
 
 @observe(name="claims-copilot", capture_input=False)  # the root: one trace per question
-def ask(question: str, callbacks=None, model=None, langchain_tracing=True) -> dict:
-    """Run the real agent. Returns the answer, the tools it called in order, its intent and its trace id.
+def ask(question: str, session_id=None, member_id=None, channel="member-portal", fake=False,
+        callbacks=None, model=None, langchain_tracing=True) -> dict:
+    """Answer one question. Returns the answer, the tools it called in order, its intent and its trace id.
 
+    session_id: groups the questions of one conversation. member_id: who is asking (never sent as-is, see below).
+    fake=True swaps Claude for free rule-based stand-ins (fakes.py): same agent, same tools, same trace shape, $0.
     langchain_tracing=False turns off the LangChain callback, so you can compare with manual-only tracing.
     """
     langfuse = get_client()
     langfuse.update_current_span(input={"question": question})  # capture_input=False: we choose what's recorded
 
-    intent = classify_intent(question)
-    langfuse.create_event(name="intent-routed", output=intent)  # an EVENT: a moment, no duration
+    # Trace-level context, set FIRST so every observation below carries it (Langfuse filters and sums by these).
+    with propagate_attributes(
+            session_id=session_id,  # one conversation: all its questions appear together under Sessions
+            user_id=tracing.pseudonymous_user_id(member_id),  # a stable alias, never the member ID itself (PHI)
+            tags=["claims-copilot", channel],
+            metadata={"channel": channel, "claim_ids": ",".join(sorted(set(re.findall(r"CLM-\d+", question))))},
+            version=APP_VERSION):
+        if fake:
+            from fakes import RuleBasedChatModel, fake_classify_intent
+            intent, model = fake_classify_intent(question), model or RuleBasedChatModel()
+        else:
+            intent = classify_intent(question)
+        langfuse.create_event(name="intent-routed", output=intent)  # an EVENT: a moment, no duration
 
+        with propagate_attributes(tags=[intent]):  # known only now; Langfuse adds it to the trace's tags
+            answer, result = _run_agent(question, model, callbacks, langchain_tracing)
+
+    tools_called = [call["name"] for msg in result["messages"] for call in getattr(msg, "tool_calls", []) or []]
+    return {"answer": answer, "tools": tools_called, "intent": intent, "trace_id": langfuse.get_current_trace_id()}
+
+
+def _run_agent(question, model, callbacks, langchain_tracing):
     # Context-manager style: everything inside the 'with' block nests under this AGENT observation.
-    with langfuse.start_as_current_observation(as_type="agent", name="run-agent", input=question) as agent_step:
+    with get_client().start_as_current_observation(as_type="agent", name="run-agent", input=question) as agent_step:
         if model is None:
             from langchain_anthropic import ChatAnthropic
-            model = ChatAnthropic(model=AGENT_MODEL)
+            model = ChatAnthropic(model=AGENT_MODEL, max_tokens=MAX_ANSWER_TOKENS)
         agent = create_agent(model, tools=TOOLS, system_prompt=SYSTEM_PROMPT)
         # The Langfuse callback hears every LangChain event (graph node, LLM call, tool call) and records each one
         # as a nested observation under run-agent: LLM calls as generations with tokens, tools as tool spans.
         handlers = ([CallbackHandler()] if langchain_tracing else []) + list(callbacks or [])
-        result = agent.invoke({"messages": [{"role": "user", "content": question}]}, config={"callbacks": handlers})
+        result = agent.invoke({"messages": [{"role": "user", "content": question}]},
+                              config={"callbacks": handlers, "recursion_limit": MAX_AGENT_STEPS})
         answer = _text(result["messages"][-1].content)
         agent_step.update(output=answer)
-
-    tools_called = [call["name"] for msg in result["messages"] for call in getattr(msg, "tool_calls", []) or []]
-    return {"answer": answer, "tools": tools_called, "intent": intent, "trace_id": langfuse.get_current_trace_id()}
+    return answer, result
 
 
 def ask_fake(question: str, callbacks=None) -> dict:
