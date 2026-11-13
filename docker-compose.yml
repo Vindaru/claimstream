@@ -28,7 +28,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # Single-node Kafka in KRaft mode (no ZooKeeper). Unused until M5, started now so the stack is complete.
+  # Single-node Kafka in KRaft mode (no ZooKeeper). M5: claims.received and claims.adjudicated live here.
   kafka:
     image: apache/kafka:3.9.1
     ports:
@@ -61,10 +61,29 @@ services:
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/claimstream
       REDIS_HOST: redis
+      KAFKA_BOOTSTRAP: kafka:29092
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  # M5: reads claims.received, runs the rules engine, publishes claims.adjudicated.
+  adjudication-service:
+    build:
+      context: .
+      dockerfile: adjudication-service/Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/claimstream
+      KAFKA_BOOTSTRAP: kafka:29092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
 
 volumes:

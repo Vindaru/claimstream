@@ -26,3 +26,6 @@ jobs:
 
       - name: Build the Intake Service image
         run: docker build -f intake-service/Dockerfile -t claimstream/intake-service:ci .
+
+      - name: Build the Adjudication Service image
+        run: docker build -f adjudication-service/Dockerfile -t claimstream/adjudication-service:ci .

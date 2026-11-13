@@ -14,13 +14,16 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.KafkaContainer;
 
 /**
  * Proves all three tiers are wired: an HTTP call (presentation) reaches Spring (service),
  * and the health check reaches a real Postgres and Redis (data), each started in Docker.
  */
 @Testcontainers
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+// Relay off: this class's containers stop when it ends, and a cached context would keep polling a dead database.
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "claimstream.outbox.relay.enabled=false")
 class StackWiringTest {
 
     @Container
@@ -30,6 +33,10 @@ class StackWiringTest {
     @Container
     @ServiceConnection(name = "redis")
     static GenericContainer<?> redis = new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+
+    @Container
+    @ServiceConnection
+    static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.9.1");
 
     @Autowired
     private TestRestTemplate http;

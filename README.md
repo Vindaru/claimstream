@@ -37,13 +37,15 @@ Prerequisites: JDK 21, Docker Desktop running.
 
 ```bash
 ./mvnw verify                 # Checkstyle + unit + integration tests (Testcontainers)
-docker compose up -d --build  # Postgres, Redis, Kafka + Intake Service
+docker compose up -d --build  # Postgres, Redis, Kafka + Intake and Adjudication services
 curl -s localhost:8080/actuator/health
 curl -s localhost:8080/api/v1/platform
 # M4: submit CLM-5002; run it twice and the second answer says Idempotent-Replayed: true
 curl -i -X POST localhost:8080/api/v1/claims -H 'Content-Type: application/json' -H 'Idempotency-Key: maria-5002' \
   -d '{"claimId":"CLM-5002","memberId":"M-1001","providerNpi":"1234567890","dateOfService":"2026-10-20",
        "lines":[{"lineNumber":1,"cptCode":"99213","billed":150.00}]}'
+# M5: the claim is decided asynchronously by the Adjudication Service, via Kafka
+docker compose exec postgres psql -U claimstream -c "select claim_id, status, reason_code from adjudication.adjudications"
 docker compose down
 
 # M3: batch intake benchmark (100k claims through 3 threading models)
@@ -53,6 +55,7 @@ docker compose down
 | Service | Port |
 |---|---|
 | Intake Service | 8080 |
+| Adjudication Service | 8081 |
 | PostgreSQL (`claimstream` / `claimstream`) | 5432 |
 | Redis | 6379 |
 | Kafka (host listener) | 9092 |
@@ -65,7 +68,9 @@ claimstream/
 ├── claims-domain/           # plain-Java domain model: Money, Member, Claim...
 ├── adjudication-engine/     # rules chain, pricing, benefits, claim lifecycle
 ├── batch-intake/            # 100k-claim batch file: single thread vs thread pool vs virtual threads
-├── intake-service/          # REST intake with idempotency keys (Postgres + Redis)
+├── event-outbox/            # transactional outbox + Kafka relay, shared by services (M5)
+├── intake-service/          # REST intake with idempotency keys (Postgres + Redis), publishes claims.received
+├── adjudication-service/    # consumes claims.received, runs the rules, publishes claims.adjudicated (M5)
 ├── claims-copilot/          # Python LangChain agent + Langfuse tracing and evals (docs/LANGFUSE_LEARNING.md)
 ├── config/checkstyle/       # code style rules
 ├── docker-compose.yml       # local stack
@@ -85,7 +90,7 @@ claimstream/
 | M2 | Adjudication rules engine (design patterns) | ✅ |
 | M3 | Batch intake (multi-threading) | ✅ |
 | M4 | Idempotency & concurrency correctness | ✅ |
-| M5 | Event-driven services (Kafka, outbox) | |
+| M5 | Event-driven services (Kafka, outbox) | ✅ |
 | M6 | Reliability (timeouts, retries, circuit breaker, gRPC) | |
 | M7 | Distributed transactions (saga) | |
 | M8 | Fraud detection | |

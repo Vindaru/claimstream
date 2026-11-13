@@ -1,6 +1,9 @@
 package com.claimstream.intake.claims;
 
 import com.claimstream.domain.Claim;
+import com.claimstream.domain.events.ClaimReceived;
+import com.claimstream.domain.events.Topics;
+import com.claimstream.outbox.OutboxWriter;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.Date;
@@ -15,6 +18,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Postgres is the source of truth. Both inserts run in one transaction, and the primary keys on
  * {@code idempotency_keys} and {@code claims} make a second copy impossible, even if 50 threads race past
  * every check in Java at the same instant: the database lets exactly one INSERT win.
+ *
+ * <p>M5: the same transaction also writes a {@code ClaimReceived} row to the outbox, so a claim is saved
+ * and announced together, or not at all.
  */
 @Repository
 public class ClaimStore {
@@ -22,11 +28,13 @@ public class ClaimStore {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate tx;
     private final ObjectMapper json;
+    private final OutboxWriter outbox;
 
-    public ClaimStore(JdbcTemplate jdbc, TransactionTemplate tx, ObjectMapper json) {
+    public ClaimStore(JdbcTemplate jdbc, TransactionTemplate tx, ObjectMapper json, OutboxWriter outbox) {
         this.jdbc = jdbc;
         this.tx = tx;
         this.json = json;
+        this.outbox = outbox;
     }
 
     /** Thrown when the idempotency key row already exists: someone else already handled this exact request. */
@@ -48,6 +56,8 @@ public class ClaimStore {
                 jdbc.update("INSERT INTO idempotency_keys (idempotency_key, request_hash, claim_id, response_status,"
                                 + " response_body) VALUES (?, ?, ?, ?, ?::jsonb)",
                         key, response.requestHash(), claim.id().value(), response.status(), write(response.body()));
+                // M5: the event is saved in the SAME transaction as the claim. Keyed by member: ordered per member.
+                outbox.append(Topics.CLAIMS_RECEIVED, claim.memberId().value(), ClaimReceived.from(claim));
             });
         } catch (DuplicateKeyException e) {
             // The transaction has rolled back. A failed INSERT waits for the winner to commit, so the winner's

@@ -13,6 +13,19 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      # acks=all + idempotence: Kafka confirms only when the message is safely stored, and never writes it twice
+      # because of a producer retry. (Duplicates from the outbox relay are still possible; consumers handle them.)
+      acks: all
+      properties:
+        enable.idempotence: true
+
+claimstream:
+  outbox:
+    poll-ms: 200
+    batch-size: 500
 
 server:
   port: 8080

@@ -12,13 +12,20 @@
 
     <artifactId>intake-service</artifactId>
     <name>ClaimStream :: Intake Service</name>
-    <description>Front door for claims: REST intake with idempotency keys (M4).</description>
+    <description>Front door for claims: REST intake with idempotency keys (M4), publishes claims.received via an outbox (M5).</description>
 
     <dependencies>
         <!-- Claim, Money, MemberId...: incoming JSON is validated by building the domain model -->
         <dependency>
             <groupId>com.claimstream</groupId>
             <artifactId>claims-domain</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- M5: transactional outbox + Kafka producer -->
+        <dependency>
+            <groupId>com.claimstream</groupId>
+            <artifactId>event-outbox</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -75,6 +82,11 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>kafka</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
