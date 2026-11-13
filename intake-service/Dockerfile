@@ -8,10 +8,13 @@ COPY config config
 COPY claims-domain/pom.xml claims-domain/pom.xml
 COPY adjudication-engine/pom.xml adjudication-engine/pom.xml
 COPY batch-intake/pom.xml batch-intake/pom.xml
+COPY event-outbox/pom.xml event-outbox/pom.xml
 COPY intake-service/pom.xml intake-service/pom.xml
+COPY adjudication-service/pom.xml adjudication-service/pom.xml
 # Download dependencies in their own layer so code-only changes rebuild fast.
 RUN ./mvnw -q -B -pl intake-service -am dependency:go-offline
 COPY claims-domain/src claims-domain/src
+COPY event-outbox/src event-outbox/src
 COPY intake-service/src intake-service/src
 RUN ./mvnw -q -B -pl intake-service -am package -DskipTests
 

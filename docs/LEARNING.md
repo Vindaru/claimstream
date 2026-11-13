@@ -232,3 +232,38 @@ With Redis forced down: still 1 row. Check-then-insert without a constraint (`Ra
 - **Test races on purpose**: latch or barrier, assert on the database.
 
 ADR: [0006-idempotent-claim-intake.md](adr/0006-idempotent-claim-intake.md)
+
+## M5 – Event-Driven Services (Kafka, Outbox)
+
+**Summary.** Intake no longer stops at the front door. It writes the claim **and** a `ClaimReceived` row to an
+**outbox** table in one transaction; a **relay** publishes unsent rows to Kafka topic `claims.received` (key = member
+id). The new **Adjudication Service** consumes it, runs the M2 rules engine, and saves the verdict, a history row and a
+`ClaimAdjudicated` outbox row in one transaction. Redeliveries are skipped (**idempotent consumer**); bad messages go
+to **`claims.received.DLT`** after 2 retries (immediately if they can never work).
+
+**Flow**
+
+```mermaid
+flowchart LR
+    I[Intake] -->|tx: claim + outbox| DB1[(public)]
+    DB1 -->|relay| K1[[claims.received]]
+    K1 --> A[Adjudication Service]
+    A -->|tx: verdict + history + outbox| DB2[(adjudication)]
+    DB2 -->|relay| K2[[claims.adjudicated]]
+    A -.->|poison| DLT[[claims.received.DLT]]
+```
+
+**Results:** CLM-5001 PAID (plan $0, Maria $110), CLM-5002 DENIED DUPLICATE_CLAIM, CLM-5003 DENIED COVERAGE_TERMINATED.
+With Kafka stopped, CLM-5005 still got `201`, waited in the outbox, and was PAID (plan $56, Maria $54) after Kafka
+came back. The same event delivered twice → one verdict, one outbound event.
+
+**Remember cards**
+- **Outbox = the event row commits with the data.** No dual write.
+- **At-least-once ⇒ idempotent consumers** (check + primary key, same transaction).
+- **Key → partition → order.** Key by member.
+- **Commit offsets after processing.**
+- **Retry transient, DLT poison.** Alarm on the DLT.
+- **Watch consumer lag and outbox backlog.**
+
+ADR: [0007-kafka-transactional-outbox.md](adr/0007-kafka-transactional-outbox.md) ·
+Lesson: [M5-event-driven.md](lessons/M5-event-driven.md)

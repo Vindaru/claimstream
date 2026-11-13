@@ -24,7 +24,9 @@
         <module>claims-domain</module>
         <module>adjudication-engine</module>
         <module>batch-intake</module>
+        <module>event-outbox</module>
         <module>intake-service</module>
+        <module>adjudication-service</module>
     </modules>
 
     <properties>

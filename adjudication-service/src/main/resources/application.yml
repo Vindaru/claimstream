@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: adjudication-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/claimstream}
+    username: ${DB_USER:claimstream}
+    password: ${DB_PASSWORD:claimstream}
+    hikari:
+      # Same Postgres server as intake, but its own schema: each service owns its tables (database per service).
+      schema: adjudication
+  flyway:
+    schemas: adjudication
+    default-schema: adjudication
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: adjudication-service
+      # A brand-new consumer group starts at the oldest message, so nothing sent before it started is skipped.
+      auto-offset-reset: earliest
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+    listener:
+      # 3 consumer threads; the topic has 6 partitions, so up to 6 threads (across instances) can help.
+      concurrency: 3
+
+server:
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+claimstream:
+  outbox:
+    poll-ms: 200
+    batch-size: 500
